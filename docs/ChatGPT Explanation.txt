@@ -1,0 +1,1679 @@
+Skip to content
+You said:
+i have a matlab script which we used at the control engineering lab (the values are not yet finished, but the main flow is there). first, tell me if this script is creating a fractional order pi/pd/pid controller. secondly, explain very briefly how the script works (i dont really know these control methods, so don't go into much depth).
+clear all
+load sin_0185.mat
+
+% Ts = 0.005;
+% t = 0:Ts:(length(y_exp)-1)*Ts; t = t';
+
+figure
+plot(t,u_exp, 'k'); hold on;
+plot(t,y_exp, 'r');
+title('Sine response - frequency 0.185, amplitude 1V, offset 6.3V');
+legend('Input', 'Ouput');
+ylabel('Amplitude (degrees)'); xlabel('Time (seconds)');
+freq = 0.185;
+phm = 45/180*pi; %phase margin
+
+pas = round(1/freq/Ts)-1;
+figure
+plot(y_exp);
+peaks_loc = 7955:floor(pas/2):2.846e4;
+y_peaks = y_exp(peaks_loc);
+max = mean(y_peaks(1:2:end));
+min = mean(y_peaks(2:2:end));
+scale = (max-abs(min))/2;
+
+%normalising the data
+u_norm =u_exp - 6.3;
+y_norm = y_exp-scale;
+figure
+plot(t, u_norm, 'k'); hold on;
+plot(t, y_norm, 'b');
+
+M =  max-scale;
+Phi = freq*2*pi*(86.48665-87.03525);
+
+% figure(2), plot(tout,U,'b'), hold on, plot(tout,Ybar_expe, 'r');
+simtime = t(end);
+omg_cut = 2*pi*freq;
+sim('ident_sin_real');
+figure
+plot(t,Ybar_expe); hold on
+plot(t,u_norm); hold on
+plot(t,y_norm);
+title('The output derivative in comparison to the input and output');
+legend('Derivative','Input', 'Ouput');
+ylabel('Amplitude (degrees)'); xlabel('Time (seconds)');
+
+MB = 6.577;
+PhiB = 2*pi*freq*(71.597213-74.3242533);
+wt = omg_cut;
+phase_deriv = MB/M*cos(PhiB-Phi);
+%phase_deriv =  -0.933888437118822;
+process_phase = Phi;
+
+data1=[];data2=[];data3=[];
+for miu=0.2:0.001:2
+    % calcul (L'*K-L*K')/(L^2+K^2)
+    z1=miu*wt^(-miu-1)*sin(pi*miu/2);
+    z2=2*wt^(-miu)*cos(pi*miu/2);
+    z3=wt^(-2*miu);
+
+    % se calculeaza ki
+
+    ki1= -((z1+z2*phase_deriv)+sqrt((z1+z2*phase_deriv)^2-4*z3*phase_deriv^2))/(2*z3*phase_deriv);
+    ki2= -((z1+z2*phase_deriv)-sqrt((z1+z2*phase_deriv)^2-4*z3*phase_deriv^2))/(2*z3*phase_deriv);
+    
+    ki3= (tan(pi-phm+process_phase)*(wt^miu))/(sin(pi*miu/2)-(tan(pi-phm+process_phase)*cos(pi*miu/2)));
+    data1 = [data1; [ki1]];
+    data2 = [data2; [ki2]];
+    data3 = [data3; [ki3]];
+
+end
+
+miu=0.2:0.001:2;
+figure; plot(miu,data1,'r')
+hold on,plot(miu,data3,'b'),title('ki1 vs ki3'),grid
+
+figure; plot(miu,data2,'r')
+hold on, plot(miu,data3,'b'),title('ki2 vs ki3'),grid
+
+
+miu = 1.09; %0.8983;
+ki = (tan(pi-phm+process_phase)*(wt^miu))/(sin(pi*miu/2)-(tan(pi-phm+process_phase)*cos(pi*miu/2)));
+
+kp = (1/M)*(1/sqrt(1+2*ki*wt^(-miu)*cos(pi*miu/2)+(ki^2)*wt^(-2*miu)));
+
+% ki = ki*10;
+% kp = kp/10;
+alfa1=1-miu;
+alfa = miu;
+s_alfa1=ora_foc_RdK(alfa1,2,0.01,100);
+
+reg = minreal(kp+kp*ki*tf(1,[1,0])*s_alfa1);
+% reg = minreal(kp+kp*ki/s_alfa1);
+regd = minreal(c2d(reg, Ts*2, 'zoh'),1e-4);
+zpk(regd)
+[num,den]=tfdata(regd,'v');
+%sim('vtol_closedloop')
+figure
+bode(reg); hold on
+bode(regd); hold off
+reccurenceRelFromNumDen(num,den)
+
+% figure
+% bode(reg); hold on
+% regd = c2d(reg, 0.005, 'foh')
+% bode(regd); hold off
+
+tau = 0.8;
+Hvtol = tf(22.24, [1,0.6934, 5.244], 'iodelay', tau);
+
+figure
+step(feedback(Hvtol*reg,1));
+figure
+step(feedback(reg,Hvtol));
+ChatGPT said:
+
+Got it — this looks like a control lab script for designing a fractional-order controller, and you’re right that the values aren’t fully polished yet, but the structure is clear.
+1️⃣ Is this a fractional PI / PD / PID controller?
+
+Yes — this script designs a fractional-order PI controller (often written as PI^λ).
+
+More specifically:
+
+    It is not PD (no derivative term of the error)
+
+    It is not full PID (no D term)
+
+    It is a fractional PI because:
+
+        There is a proportional term kp
+
+        There is an integral term of non-integer order μ (called miu in the code)
+
+        The integral operator is s−μs−μ, not 1/s1/s
+
+So the controller structure is essentially:
+C(s)=kp(1+kis−μ)
+C(s)=kp​(1+ki​s−μ)
+
+That’s exactly what makes it fractional-order.
+2️⃣ Very brief explanation of how the script works (high level)
+
+Here’s the big picture, without going deep into theory:
+
+    Load and plot experimental data
+
+        Uses a sine input (u_exp) and measured output (y_exp)
+
+        Plots them to see the system’s response
+
+    Extract frequency-domain information
+
+        Uses peaks of the sine response to estimate:
+
+            Gain (M)
+
+            Phase (Phi)
+
+        This is a basic system identification from sine testing
+
+    Estimate derivative behavior
+
+        A Simulink model (ident_sin_real) is used to estimate output derivatives
+
+        This helps determine how the system behaves around the chosen frequency
+
+    Sweep the fractional order μ
+
+        The loop miu = 0.2:0.001:2
+
+        Computes possible integral gains (ki) for each μ
+
+        Finds values that satisfy:
+
+            Desired phase margin
+
+            Measured system phase and gain
+
+    Choose one μ and compute controller gains
+
+        You manually pick miu = 1.09
+
+        Compute:
+
+            ki → fractional integral gain
+
+            kp → proportional gain
+
+    Build the fractional controller
+
+        ora_foc_RdK approximates the fractional operator s−μs−μ
+
+        Controller is assembled as:
+
+        reg = kp + kp*ki*(1/s)*s_alfa1;
+
+        Then discretized for digital implementation
+
+    Test it on the plant
+
+        Apply the controller to a model (Hvtol)
+
+        Plot step responses of the closed loop
+
+One-sentence summary
+
+👉 This script identifies a system using sine data, then designs and tests a fractional-order PI controller that meets a chosen phase margin at a specific frequency.
+
+If you want, I can also:
+
+    Rewrite this as a clean block diagram
+
+    Explain what “fractional integral” means intuitively
+
+    Help you label this properly for a lab report
+
+You said:
+my final goal: i need to make a project where i control the RPM of a computer fan. i already have everything implemented in C#, so don't talk about that part, but the controller i used to control the RPM on the fan is a FOPID, which I did NOT compute, i just used some values for KP, KI, KD, and the other which i don't know which are the values that can be tweaked, some lambda and something else (github copilot made the code) (chosen using educated guesses). 
+
+what i need now is to use this matlab script to compute a FOPI controller, i think. maybe even a FOPID, if it's not to complicated, but there are some problems:
+- i know briefly control engineering
+- i understand the idea and sort of how stuff works (from a mathematical pov, i know the mechanical and code parts of the C# code and the fan)
+- i know that sometimes there is a need for PI ctrl, sometimes only PD will do the trick, but sometimes PID is the only one that works, but i don't know why and what each of P, I and D do exactly
+- i don't know what fractional means
+
+what is your plan?
+ChatGPT said:
+
+Alright, this is actually a very reasonable situation to be in 👍
+You’ve built a real system, it works, Copilot gave you a FOPID that “kind of works”, and now you want to understand + justify + compute a controller properly using MATLAB — without turning this into a PhD.
+
+I’ll give you a clear, realistic plan, tailored to:
+
+    your current knowledge level,
+
+    your existing MATLAB script,
+
+    and the fact that the plant is a computer fan (RPM control).
+
+No math overload, no C# talk.
+The short answer (big picture)
+
+Plan:
+We will design a fractional-order PI controller (FOPI) first, using your MATLAB script, validate it, and only then decide whether adding a fractional D term (FOPID) is actually necessary.
+
+    For a fan RPM system:
+    🔹 FOPI is usually enough
+    🔹 FOPID is often overkill and harder to justify
+
+Before the plan: ultra-brief intuition (important)
+What P, I, D do (plain English)
+
+    P (Proportional)
+    “If the RPM error is big → react strongly.”
+    ✔ Fast response
+    ❌ Leaves steady-state error
+
+    I (Integral)
+    “If error exists for a long time → eliminate it.”
+    ✔ Zero steady-state error
+    ❌ Can cause overshoot / oscillation
+
+    D (Derivative)
+    “If RPM is changing too fast → slow down.”
+    ✔ Damping, stability
+    ❌ Sensitive to noise
+
+Why sometimes PI, sometimes PID?
+System type	Typical controller
+Slow, smooth (fan, motor speed)	PI
+Fast, oscillatory	PID
+Noisy measurements	Avoid D
+
+👉 Fan RPM ≈ classic PI use-case
+What “fractional” means (intuitively)
+
+Normally:
+
+    Integral = 1/s1/s
+
+    Derivative = ss
+
+Fractional control says:
+
+    Integral = 1/sλ1/sλ, where λ is not 1
+
+    Derivative = sμsμ, where μ is not 1
+
+So instead of:
+
+    “Integrate fully”
+
+you get:
+
+    “Integrate partially”
+
+Why that’s useful
+
+    More tuning freedom
+
+    Smoother response
+
+    Less overshoot
+
+    More robust to model errors
+
+Think of it as a volume knob instead of an on/off switch.
+Now: the actual plan 🧭
+Phase 1 — Lock the scope (what you will NOT do)
+
+You will not:
+
+    Identify a full fan model from physics
+
+    Design an optimal controller
+
+    Do fractional math by hand
+
+    Implement fractional operators in C# (already done)
+
+This is a control-lab-level project, not research.
+Phase 2 — Decide the controller structure
+
+We choose:
+C(s)=Kp(1+Kis−λ)
+C(s)=Kp​(1+Ki​s−λ)
+
+Why?
+
+    Matches your MATLAB script
+
+    Easy to explain in a report
+
+    Enough for RPM control
+
+    Fractional part adds justification + novelty
+
+➡️ This is a FOPI controller
+
+We will not do FOPID unless tests clearly show it’s needed.
+Phase 3 — Adapt your MATLAB script (minimal changes)
+
+Your script already does 90% of the job.
+
+What it already does:
+✔ Uses sine test data
+✔ Extracts gain and phase
+✔ Chooses fractional order miu = λ
+✔ Computes kp and ki
+✔ Builds a fractional PI controller
+
+So the plan is:
+Step 3.1 — Replace the plant data
+
+    Use fan RPM response instead of lab data
+
+    Either:
+
+        sine modulation of PWM → RPM
+
+        or step response (simpler)
+
+We can adapt the script to work with step data if needed.
+Step 3.2 — Pick ONE design frequency
+
+    Fan dynamics are slow → low frequency
+
+    Choose frequency where:
+
+        fan reacts clearly
+
+        noise is low
+
+This replaces:
+
+freq = 0.185;
+
+Step 3.3 — Let the script compute:
+
+    λ (fractional order)
+
+    KpKp​
+
+    KiKi​
+
+You already have this part:
+
+miu = 1.09;
+ki = ...
+kp = ...
+
+➡️ These become your final controller parameters
+Phase 4 — Validate (MATLAB only)
+
+You check:
+
+    Step response
+
+    Overshoot
+
+    Settling time
+
+    Steady-state error
+
+If:
+
+    steady-state error ≈ 0 ✔
+
+    no wild oscillations ✔
+
+➡️ Stop. This is good engineering.
+Phase 5 — Only if needed: extend to FOPID
+
+If (and only if):
+
+    response is too oscillatory
+
+    or settling time is too long
+
+Then we add:
++Kdsμ
++Kd​sμ
+
+This is:
+
+    one extra parameter
+
+    more tuning
+
+    harder to justify in a report
+
+For a fan, most projects never need this.
+How you’ll explain this in your project report
+
+You’ll be able to say:
+
+    “A fractional-order PI controller was chosen because the fan exhibits slow, first-order dynamics. The fractional integral term allows finer tuning of the steady-state error and transient response compared to a classical PI controller.”
+
+That’s a solid, defensible statement.
+Final checkpoint
+
+If you want, next we can:
+
+    Strip your MATLAB script down to the exact minimal version you need for a fan
+
+    Decide PI vs FOPI vs PID based on one fan experiment
+
+    Translate kp, ki, λ cleanly into your C# FOPID structure
+
+    Help you write the methodology section of the project
+
+Just tell me what you want to tackle first.
+You said:
+i do not need to write a report, i just need to make something simple that works. Currently, my FOPID controller, given that Copilot made it correctly, works with kp = 0.005 and changes the PWM frequency once every 500ms. it seems to have a bit of overshoot, but it stabilizes.
+
+however, as i said, it is not computed. so:
+1. help me understand better, just the intuition, for P, I and D
+2. help me understand better, again just the intuition, for fractional. i do not really understand this part
+ChatGPT said:
+
+Perfect — thanks for clarifying.
+Then we’ll forget reports, forget MATLAB math, forget formal design and focus on intuition that actually maps to what you’re seeing with the fan.
+
+I’ll keep this concrete and grounded in your exact situation:
+PWM → fan → RPM → overshoot → settles.
+1️⃣ Intuition for P, I, D (fan RPM edition)
+
+Think of this as how you twist the PWM knob based on RPM error.
+P — Proportional
+
+    “How hard do I push when I’m wrong?”
+
+What it does
+
+    Looks at current error:
+
+    error = target_RPM − current_RPM
+
+    If error is big → big PWM change
+
+    If error is small → small PWM change
+
+What you see on a fan
+
+    Increase kp → fan reacts faster
+
+    Too much kp → overshoot (RPM goes past target)
+
+Mental image
+
+You’re driving and see you’re below speed limit → you press the gas proportional to how slow you are.
+Why P alone is not enough
+
+    When error becomes small, the push becomes tiny
+
+    Fan may stabilize slightly below target RPM
+
+➡️ P = fast reaction, but imperfect accuracy
+I — Integral
+
+    “Have I been wrong for a long time?”
+
+What it does
+
+    Adds up error over time
+
+    Even a small error, if it lasts long enough, gets corrected
+
+What you see on a fan
+
+    Eliminates steady-state error
+
+    Fan reaches exact RPM target
+
+The catch
+
+    If error accumulates too much → overshoot
+
+    Fan feels “lazy” to stop correcting
+
+Mental image
+
+You keep being 2 km/h under the speed limit for 30 seconds → you slowly press more gas even though the error is small.
+
+➡️ I = accuracy, but can cause overshoot
+D — Derivative
+
+    “How fast am I approaching the target?”
+
+What it does
+
+    Looks at rate of change of RPM
+
+    If RPM is rising fast → slow down early
+
+What you see on a fan
+
+    Reduces overshoot
+
+    Makes the system feel “braked” near target
+
+The catch
+
+    Sensitive to noise (RPM measurement jitter)
+
+    Often unnecessary for slow systems like fans
+
+Mental image
+
+You’re about to reach the speed limit fast → you lift your foot before hitting it.
+
+➡️ D = damping / anticipation
+Why your system works with small kp = 0.005
+
+    Fan is slow
+
+    PWM update every 500 ms (very slow control loop!)
+
+    That alone acts like damping
+
+    Overshoot is mild and settles
+
+This is why even a guessed controller works 🙂
+2️⃣ Fractional control — intuition only (no math)
+
+This is the confusing part, but it’s actually simple conceptually.
+Classical control (what you already know)
+
+    Integral = “remember everything equally”
+
+    Derivative = “react to instant change only”
+
+These are extremes.
+Fractional control says:
+
+    “What if I want something in between?”
+
+Fractional Integral (λ)
+Normal integral
+
+    Remembers error forever
+
+    Old errors matter just as much as recent ones
+
+Fractional integral
+
+    Remembers recent past more
+
+    Old errors fade away gradually
+
+What this means for your fan
+
+    Less integral windup
+
+    Less overshoot
+
+    Still removes steady-state error
+
+Mental image
+
+Instead of:
+
+    “I remember every mistake forever”
+
+It’s:
+
+    “I mostly care about what happened recently”
+
+Fractional Derivative (μ)
+Normal derivative
+
+    Reacts only to instantaneous slope
+
+    Very sensitive to noise
+
+Fractional derivative
+
+    Reacts to trend, not spikes
+
+    Smoother damping
+
+Mental image
+
+Instead of:
+
+    “OMG it changed right now!”
+
+It’s:
+
+    “Hmm, it’s been speeding up lately…”
+
+Why fractional helps fans specifically
+
+Fans are:
+
+    Slow
+
+    Noisy (RPM measurement jitter)
+
+    Have delays
+
+Fractional control:
+
+    Is more forgiving
+
+    Gives smoother PWM changes
+
+    Handles delay better
+
+That’s why your Copilot FOPID “just works”.
+The two extra parameters you saw
+
+In FOPID:
+Parameter	Meaning
+λ (lambda)	How “strong” the memory of I is
+μ (mu)	How aggressive D is
+
+Typical values:
+
+    λ ≈ 0.7–1.2
+
+    μ ≈ 0.5–1
+
+You don’t need to know the math — just know:
+
+    They soften I and D.
+
+Why you don’t feel fractional control as different
+
+Because:
+
+    You update PWM every 500 ms
+
+    Fan dynamics are slow
+
+    Differences are subtle but stabilizing
+
+Fractional control shines exactly in systems like this.
+Final intuition summary (pin this)
+
+    P → “push harder when wrong”
+
+    I → “fix long-term error”
+
+    D → “slow down before overshooting”
+
+    Fractional → “do all of the above, but less aggressively and more smoothly”
+
+If you want next:
+
+    I can tell you exactly which terms you can safely remove
+
+    Or explain why PI alone is probably enough
+
+    Or help you tune λ and μ by feel, not math
+
+Just tell me.
+You said:
+Why P alone is not enough
+
+When error becomes small, the push becomes tiny
+
+Fan may stabilize slightly below target RPM
+
+➡️ P = fast reaction, but imperfect accuracy
+
+why? in theory, i believe the rpm would get exponentially slower (it will look like the log curve?) to the target RPM? will it never reach it ?
+ChatGPT said:
+
+Great question — this is exactly the right thing to be confused about, and your intuition is almost right. The missing piece is what “steady-state” really means in a real, physical system like a fan.
+
+Let’s clear this up cleanly.
+Short answer (then we’ll justify it)
+
+    With P-only control, the RPM can approach the target asymptotically, but in a real fan it will settle at a value below the target.
+
+Not because of math tricks — but because the fan needs a non-zero PWM to counter losses, and P-only control cannot generate that PWM once the error is zero.
+Your intuition: “exponentially slower to the target”
+
+You’re thinking of something like this:
+
+    Error → smaller
+
+    Control effort → smaller
+
+    RPM → slowly creeps toward target
+
+That is true for an ideal system.
+
+But real fans are not ideal.
+The key missing idea: equilibrium requires effort
+A fan at constant RPM needs:
+
+    Torque to overcome:
+
+        friction
+
+        air drag
+
+        bearing losses
+
+    That means non-zero PWM
+
+Let’s walk through what P-only does.
+P-only control logic (simplified)
+
+PWM = kp × (target_RPM − actual_RPM)
+
+At the target RPM:
+
+    error = 0
+
+    PWM = 0
+
+❌ That means no torque
+❌ That means RPM must fall
+
+So the system cannot stay at the target.
+What actually happens
+
+The fan settles at a point where:
+
+kp × error = PWM_needed_to_hold_RPM
+
+Which implies:
+
+error ≠ 0
+
+That’s the steady-state error.
+Visual intuition
+
+Imagine pushing a box across the floor.
+
+    P = how hard you push based on how far the box is from the target
+
+    Friction resists motion
+
+To keep the box moving:
+
+    You must keep pushing
+
+    If you stop pushing → box stops
+
+But P-only says:
+
+    “If distance = 0 → push = 0”
+
+So the box stops before the target.
+Why it looks exponential at first
+
+At the beginning:
+
+    Error is large
+
+    PWM is large
+
+    Fan accelerates quickly
+
+As RPM rises:
+
+    Error shrinks
+
+    PWM shrinks
+
+    Acceleration drops
+
+This gives you:
+
+    An exponential-looking rise
+
+    Then a flat plateau below target
+
+Why it never reaches the target (in practice)
+
+Because reaching the target requires:
+
+PWM > 0  at error = 0
+
+But P-only can’t do that.
+What Integral fixes
+
+Integral says:
+
+    “If error persists, even if it’s small, keep increasing PWM.”
+
+So eventually:
+
+    PWM matches losses
+
+    Error goes to zero
+
+    RPM locks exactly to target
+
+Why your system almost reaches the target
+
+You might say:
+
+    “But my fan almost hits it!”
+
+That’s because:
+
+    Very small error × kp ≈ required PWM
+
+    Measurement noise masks the true error
+
+    Discrete updates (500 ms) blur the math
+
+But the offset is always there, even if tiny.
+Mathematical intuition (no equations)
+
+    P-only control finds a balance point
+
+    That balance point is not the target
+
+    Integral shifts the balance point to the target
+
+Final mental model (this is the one to keep)
+
+    P gets you close
+
+    I gets you exact
+
+    D keeps you civilized
+
+And:
+
+    Fractional I gets you exact, but gently
+
+If you want next, I can:
+
+    Show why P-only works perfectly in simulation but not in reality
+
+    Explain why your 500 ms update acts like a hidden D term
+
+    Explain why overshoot appears only when I is present
+
+Just say the word.
+You said:
+understood, let's move on to I
+ChatGPT said:
+
+Nice — this is the right order to learn it.
+Let’s zoom in on I (Integral) and keep everything tied to your fan.
+Integral control (I) — intuition that actually sticks
+One-sentence idea
+
+    I exists to generate the “constant push” that P cannot.
+
+That’s it. Everything else is a consequence.
+What I really does (no equations)
+
+Integral means:
+
+    “If there is any error, keep adding to the control signal.”
+
+Even if the error is:
+
+    small
+
+    constant
+
+    barely measurable
+
+…it keeps accumulating.
+Why I is necessary for a fan
+
+Recall:
+
+    Fan needs constant PWM to hold RPM
+
+    At target RPM:
+
+        P gives 0 PWM
+
+        Fan slows down
+
+Integral fixes this by saying:
+
+    “I remember that I had to push to get here.”
+
+So:
+
+    PWM stays non-zero
+
+    RPM stays at target
+
+Step-by-step fan story (this is the key)
+1️⃣ Start below target RPM
+
+    Error is large
+
+    P pushes hard
+
+    I starts accumulating
+
+2️⃣ RPM approaches target
+
+    Error becomes small
+
+    P contribution shrinks
+
+    I contribution is already built up
+
+3️⃣ At target RPM
+
+    Error ≈ 0
+
+    P ≈ 0
+
+    I still outputs PWM
+
+That PWM exactly balances:
+
+    friction
+
+    air drag
+
+    losses
+
+➡️ Stable RPM with zero error
+Why I causes overshoot
+
+This part is crucial.
+What I doesn’t know
+
+Integral does not know when to stop accumulating until the error changes sign.
+
+So:
+
+    Fan is accelerating
+
+    Error is still positive
+
+    I keeps increasing PWM
+
+    RPM overshoots target
+
+Only after overshoot:
+
+    Error becomes negative
+
+    I starts unwinding
+
+That’s why:
+
+    I improves accuracy
+
+    but hurts transient behavior
+
+Mental image (very important)
+
+Imagine filling a bucket with a slow leak:
+
+    Error = water level below mark
+
+    I = you keep pouring water
+
+    Even when you’re almost at the mark:
+
+        you’re still pouring
+
+    Result: overflow (overshoot)
+
+Why I alone is also bad
+
+If you use only I:
+
+    No immediate reaction
+
+    Very slow response
+
+    Huge overshoot
+
+That’s why PI exists:
+
+    P → reacts now
+
+    I → fixes long-term error
+
+What happens when KI is too large
+
+On your fan:
+
+    PWM ramps too much
+
+    Big overshoot
+
+    Oscillation
+
+    “Hunting” around target RPM
+
+This is integral windup.
+Fractional I (preview, intuitive only)
+
+Normal I:
+
+    Remembers everything forever
+
+Fractional I:
+
+    Remembers recent past more
+
+    Old errors slowly fade
+
+So:
+
+    Still removes steady-state error
+
+    Overshoot is smaller
+
+    Recovery is smoother
+
+This is why fractional PI feels “nicer”.
+Why your 500 ms update matters
+
+Your loop:
+
+    Integrates slowly
+
+    Acts like a built-in limiter
+
+    Prevents runaway integral
+
+That’s why:
+
+    Even guessed KI values don’t explode
+
+    System still stabilizes
+
+Takeaway (lock this in)
+
+    P → gets you moving
+
+    I → keeps you there
+
+    Too much I → overshoot
+
+    Fractional I → same goal, softer memory
+
+Next logical step:
+👉 D (Derivative) — why it prevents overshoot without fixing steady-state error
+or
+👉 Fractional I in practice — how λ changes behavior by feel
+
+Which one do you want next?
+You said:
+explain the intuition behind the math of adding the intergral. why is I memory? i know that the integral is something like area underneath a graph being added.. but i don't really undestand how you sample the exact area beneath a graph or if it's even true and how do you express it in terms of measurement unit?
+ChatGPT said:
+
+This is an excellent question — you’re now asking about the why behind the math, not just the effect.
+I’ll go slow, build intuition step by step, and keep it physical, not abstract calculus.
+1️⃣ Why “integral = memory” is not just a metaphor
+
+You already know:
+
+    Integral ≈ area under a curve
+
+The key insight is what that area represents physically.
+
+Let’s define the signal being integrated:
+
+error(t) = target_RPM − actual_RPM
+
+Now imagine you don’t look at the error once, but you keep adding it up over time.
+
+That accumulated sum is exactly what we call memory.
+2️⃣ Discrete-time view (this is how your C# code actually works)
+
+Forget continuous math for a moment.
+
+Your controller runs every 500 ms.
+
+So what you really compute is something like:
+
+I = I + error × Δt
+
+That’s it.
+
+No calculus magic.
+
+Each update:
+
+    Take the current error
+
+    Multiply by time step
+
+    Add it to the stored value
+
+That stored value is the integral.
+3️⃣ Why this equals “area under the curve”
+
+Imagine plotting error vs time:
+
+    At each 500 ms:
+
+        You add a rectangle:
+
+            height = error
+
+            width = Δt
+
+Stacking rectangles = approximating the area.
+
+So yes:
+
+    You are sampling the area
+
+    You never need the “exact” area
+
+    Control systems work perfectly with this approximation
+
+This is called numerical integration, and it’s exactly what’s happening.
+4️⃣ Why this creates memory (the crucial leap)
+
+Let’s say:
+
+    Error = +100 RPM for 10 seconds
+
+Every cycle:
+
+    You add +100 × 0.5 to I
+
+After 10 seconds:
+
+    I is large
+
+Now suppose:
+
+    Error suddenly becomes 0
+
+What happens to I?
+
+➡️ Nothing. It stays large.
+
+That means:
+
+    The controller remembers the past error
+
+    Even though the present error is zero
+
+That’s memory.
+5️⃣ Why memory is exactly what you need
+
+Recall the fan problem:
+
+    To maintain RPM:
+
+        You need constant PWM
+
+    But at target RPM:
+
+        error = 0
+
+        P gives PWM = 0
+
+Integral says:
+
+    “I remember that I needed PWM to get here.”
+
+So it keeps outputting PWM because the stored integral is non-zero.
+6️⃣ Units: this is the part most people never explain
+
+Let’s do it properly.
+Error unit
+
+RPM
+
+Time unit
+
+seconds
+
+Integral of error
+
+RPM × seconds
+
+That’s weird at first — but stay with me.
+
+Now multiply by KI:
+
+KI × (RPM × s) = PWM
+
+So:
+
+KI has units: PWM / (RPM × s)
+
+Nothing unphysical is happening.
+
+The integral stores:
+
+    “How much RPM error has existed for how long.”
+
+7️⃣ Why integral ramps the output
+
+If error is constant:
+
+    Each step adds the same amount
+
+    Integral grows linearly
+
+That’s why:
+
+    PWM ramps up
+
+    Instead of jumping instantly
+
+This ramping is why integral is:
+
+    Powerful
+
+    Dangerous
+
+8️⃣ Why integral overshoots (math intuition)
+
+Integral only stops growing when:
+
+error = 0
+
+But:
+
+    Fan has inertia
+
+    By the time error becomes zero
+
+    PWM is already too large
+
+So:
+
+    RPM keeps rising
+
+    Error becomes negative
+
+    Integral slowly unwinds
+
+Overshoot is not a bug — it’s built into the math.
+9️⃣ Why this is NOT about “exact area”
+
+Important correction to your intuition:
+
+❌ The integral is not about measuring a precise geometric area
+✅ It’s about accumulating influence over time
+
+Control theory borrowed the math language — but the meaning is physical.
+🔟 Final mental model (keep this)
+
+    Each control loop:
+
+        “How wrong am I?”
+
+        “How long have I been wrong?”
+
+    Add that to a memory register
+
+    Use that memory to push harder
+
+That memory is the integral.
+Preview: fractional integral (why it softens memory)
+
+Classical integral:
+
+    “Every past error matters equally.”
+
+Fractional integral:
+
+    “Recent errors matter more than ancient ones.”
+
+So instead of:
+
+I = I + error × Δt
+
+It’s more like:
+
+I = (slightly forget old stuff) + error × Δt
+
+Same idea, gentler behavior.
+
+If you want next, I can:
+
+    Explain why derivative is “prediction” mathematically
+
+    Show what fractional I changes in this exact accumulation
+
+    Map this directly to your C# variables
+
+Just say where to go next.
+You said:
+okay, now D?
+ChatGPT said:
+
+Alright! Let’s tackle D – the derivative part intuitively, and I’ll tie it to what you already know about P and I.
+1. The intuition
+
+The derivative looks at how fast the error is changing.
+
+    If the error is growing quickly, the derivative pushes against that growth to prevent overshoot.
+
+    If the error is decreasing quickly, the derivative may hold back the “push” a bit to avoid crashing past the target.
+
+Think of it like predicting the future: it doesn’t just care about how far you are from the target (P) or how long you’ve been off (I), it cares about the speed at which you’re approaching or leaving the target.
+2. Intuition in terms of a fan
+
+    P reacts to “you’re 100 RPM too low, spin faster!”
+
+    I reacts to “you’ve been too slow for 10 seconds, let’s add more to compensate”
+
+    D reacts to “RPM is climbing fast, slow down a little before overshooting.”
+
+So derivative reduces overshoot and smooths the response.
+3. Intuition about the math
+
+    Derivative = slope = change in error per unit of time: D=KD⋅ddt(error)D=KD​⋅dtd​(error)
+
+    Units: if error is RPM and time is seconds, then derivative is RPM per second.
+
+    Multiplying by KDKD​ adjusts how strongly you react to that rate of change.
+
+✅ Summary
+
+    P: reacts to current error
+
+    I: reacts to accumulated error (memory)
+
+    D: reacts to speed of change of error (prediction)
+
+This is why PID controllers are powerful: they cover present, past, and future trend of the error.
+
+If you want, I can now explain fractional order in a way that directly links to what you already understand about P, I, and D — it’s simpler than it sounds. Do you want me to do that next?
+You said:
+explain a bit how these relate to the matlab script. i understand the intuition of all 3 now, so i think i could correlate to the script
+ChatGPT said:
+
+Perfect! Now that you have the intuition, let’s connect it to your MATLAB script and see how it relates to P, I, D and fractional order:
+1. Where P shows up
+
+In your script:
+
+kp = (1/M)*(1/sqrt(1+2*ki*wt^(-miu)*cos(pi*miu/2)+(ki^2)*wt^(-2*miu)));
+
+    kp is the proportional gain.
+
+    It’s basically the “how hard we push for the current error” factor.
+
+    In a regular PID, this is just the Kp you’d tune manually.
+
+2. Where I shows up
+
+ki = (tan(pi-phm+process_phase)*(wt^miu))/(sin(pi*miu/2)-(tan(pi-phm+process_phase)*cos(pi*miu/2)));
+
+    ki is the integral gain, controlling the memory effect.
+
+    Later, it’s combined with kp in:
+
+reg = minreal(kp + kp*ki*tf(1,[1,0])*s_alfa1);
+
+    tf(1,[1,0]) is the 1/s term, the Laplace transform representation of an integral.
+
+    So kp*ki*1/s is basically the I-term.
+
+3. Where fractional comes in
+
+alfa1 = 1-miu;
+alfa = miu;
+s_alfa1 = ora_foc_RdK(alfa1,2,0.01,100);
+
+    Here, instead of 1/s (normal integral) or s (normal derivative), you have s^(-alfa1) or s^alfa.
+
+    That’s fractional calculus: the exponent can be non-integer.
+
+    Fractional order smoothly interpolates between P, I, D behavior.
+
+        If α = 1 → normal integral
+
+        If α = 0.5 → “half integral”, slower memory effect
+
+        Same for derivative.
+
+4. Putting it together
+
+The final controller:
+
+reg = minreal(kp + kp*ki*tf(1,[1,0])*s_alfa1);
+
+    kp → proportional
+
+    kp*ki*1/s^α1 → fractional integral (I)
+
+    There is a commented part that could add fractional derivative if you want:
+
+% reg = minreal(kp+kp*ki/s_alfa1);
+
+    And later you can discretize it to implement it on your fan.
+
+✅ Summary
+
+    P = kp
+
+    I = ki combined with 1/s^α1
+
+    D (optional fractional) = could be added as s^α term
+
+    Fractional order = α and 1-α (miu) are the tweaks that let you “tune the memory and prediction smoothly” instead of being all-or-nothing.
+
+If you want, the next step is how to modify this script to compute a simple FOPI for your fan, using your known frequency response, without worrying too much about advanced derivations. That’s usually enough to get it working in C#.
+
+Do you want me to do that next?
+You said:
+oh wait, right, what is the fractional part? i forgot about that. let's go back to the intuition. i don't understand:
+- what is it
+- why would you add something else besides P, I and D
+- if this fractional thing only makes sense in PI ctrl
+ChatGPT said:
+
+Perfect, let’s slow down and focus on fractional order, in terms you can intuitively grasp.
+1. What fractional order is
+
+    In regular PID:
+
+        P reacts to current error → proportional
+
+        I integrates error → memory
+
+        D differentiates error → prediction
+
+    Fractional order PID (FOPID / FOPI / FOPD) allows the integral and derivative exponents to be non-integer.
+
+Think of it like this:
+
+    Normal integral: 1/s → “full memory” of error
+
+    Fractional integral: 1/s^α with 0 < α < 1 → “partial memory”
+
+    Normal derivative: s → “full reaction to speed of change”
+
+    Fractional derivative: s^β with 0 < β < 1 → “partial prediction”
+
+So fractional order lets you interpolate between P, I, and D behavior instead of being all-or-nothing.
+2. Why would you add it besides P, I, D?
+
+    Normal PID is limited: P+I+D can sometimes overshoot, oscillate, or be too slow, especially for systems with “weird” dynamics (like a fan with friction, delay, or nonlinearities).
+
+    Fractional terms give extra tuning flexibility:
+
+        You can make the integral act slower or faster than normal.
+
+        You can make the derivative act less aggressive or smoother.
+
+    Intuition: it’s like saying “I don’t want full memory, I want somewhere between memory and instant reaction” or “I don’t want full derivative, just a partial trend prediction.”
+
+3. Does it only make sense for PI?
+
+    No, it can be applied to I and D in any combination:
+
+        FOPI → fractional integral, no derivative
+
+        FOPD → fractional derivative, no integral
+
+        FOPID → fractional integral + fractional derivative
+
+    P usually stays normal (integer order), because fractional P isn’t meaningful—P is already “instant push proportional to error.”
+
+✅ Intuitive analogy
+
+    Regular integral: “remember everything equally from the past.”
+
+    Fractional integral: “remember more recent past more strongly, distant past less strongly.”
+
+    Regular derivative: “react exactly to speed.”
+
+    Fractional derivative: “react partially to speed, smoother.”
+
+It’s basically a way to have finer control over how memory and prediction work.
+
+If you want, I can now explain how your MATLAB script is actually computing a fractional integral for the PI controller, in the simplest way possible. That will directly connect the intuition with the code.
+
+Do you want me to do that next?
+You said:
+why wouldn't I or D be integral without fractional order stuff? when i have seen a PID impmlemented in the past, i could tune the P, I and D to be anywhere between 0 and 1, and i don;t think it was a fractional order
+ChatGPT said:
+
+Ah, I see exactly what’s confusing—you’re thinking about the tuning values (gains) vs the “order” of the operation. Let me clarify:
+1. Tuning a normal PID
+
+    When you set Kp, Ki, or Kd between 0 and 1, you are just scaling the effect of that term:
+
+        Kp = 0.5 → proportional push is half as strong
+
+        Ki = 0.2 → integral memory effect is weaker
+
+        Kd = 0.1 → derivative reaction is smaller
+
+    This does not change the type of operation: the integral is still a full integral, the derivative is still a full derivative.
+
+        Mathematically: integral is still 1/s, derivative is still s in Laplace domain.
+
+2. Fractional order PID
+
+    Fractional order PID changes the operation itself, not just the scale:
+
+        Fractional integral: 1/s^α with α ≠ 1 → “partial memory”
+
+        Fractional derivative: s^β with β ≠ 1 → “partial prediction”
+
+    The difference is subtle but important:
+
+        Normal PID: only integer powers (s or 1/s)
+
+        Fractional PID: non-integer powers (s^0.5 or 1/s^0.7)
+
+    Tuning Ki in normal PID = change strength of memory
+
+    Changing α in FOPID = change how memory accumulates over time, not just its strength
+
+3. Analogy
+
+    Normal PID: “I remember everything equally (integral), I react exactly to speed (derivative)”
+
+    Fractional PID: “I remember more recent things more, distant past less (integral), I react partially to speed (derivative)”
+
+✅ Key point:
+You can always make a normal PID work by tuning gains, but fractional PID gives more flexibility in the shape of response, especially for systems with slow dynamics, delays, or oscillations.
+
+If you want, the next step could be linking this directly to the MATLAB script so you see exactly where the fractional integral (s^-α) comes in, and how you would compute a FOPI for your fan. That’s the part that will make the script actually useful for your project.
+
+Do you want me to go there next?
+You said:
+basically, 1/s = integral in laplace domain, but 1/s^0.5 is not an integral anymore? how would you reflect this change in time domain? 
+ChatGPT said:
+
+Exactly, you’re on the right track — let’s carefully break this down.
+1. 1/s in Laplace → normal integral
+
+    In Laplace domain:
+
+I(s)=1sE(s)
+I(s)=s1​E(s)
+
+    In time domain:
+
+i(t)=∫0te(τ) dτ
+i(t)=∫0t​e(τ)dτ
+
+    This is full memory, every past error counts equally.
+
+2. 1/s^α in Laplace → fractional integral
+
+    If α = 0.5,
+
+I(s)=1s0.5E(s)
+I(s)=s0.51​E(s)
+
+    This does not correspond to the usual integral anymore. It’s a fractional integral.
+
+    Time-domain equivalent is more complicated — called the Riemann–Liouville fractional integral:
+
+iα(t)=1Γ(α)∫0te(τ)(t−τ)1−αdτ
+iα​(t)=Γ(α)1​∫0t​(t−τ)1−αe(τ)​dτ
+
+Where Γ(α) is the gamma function (generalizes factorial).
+3. Intuition in time domain
+
+    Normal integral (α=1): all past error counts equally → sum/area under curve.
+
+    Fractional integral (0<α<1): recent errors count more, distant past counts less → “weighted memory” with a decaying influence over time.
+
+Think of it like forgetting slowly: the further in the past the error, the less it contributes, but it still contributes a little.
+
+    If α < 1, memory is partial, smoother, less aggressive than full integral.
+
+    If α > 1 (rare), memory effect grows faster than normal integral (almost like “super integral”).
+
+4. Why this matters
+
+    On your fan: a normal integral could accumulate too aggressively, causing overshoot or oscillations.
+
+    Fractional integral lets you tune how memory accumulates, giving smoother control.
+
+If you want, I can now show exactly how your MATLAB script implements the fractional integral, in terms you could plug into your fan controller. This will connect everything you’ve learned to practical use.
+
+Do you want me to do that?
+You said:
+this seems like advanced math, but i understood that:
+- using a fractional order, you change the argument of the integral (in time domain)
+- the effect is a more optimized "memory" for control, in the sense that recent memory is more important
+ChatGPT said:
+
+Exactly! That’s the right intuition—you don’t need to worry about the gamma functions or complicated math if your goal is just practical control.
+
+    Fractional order changes the “shape” of memory, not just its strength.
+
+    Recent errors matter more than old ones, unlike a normal integral that treats all past errors equally.
+
+    This gives you smoother, better-tuned control with less overshoot or oscillation.
+
+Basically, it’s like having a smarter memory knob on your controller.
+
+Next, we can see how your MATLAB script actually computes this fractional integral for the FOPI controller so you can use it with your fan. That will make it concrete. Do you want me to explain that?
+You said:
+before this, how can i save this chat? i am not logged in
+ChatGPT said:
+
+Since you’re not logged in, you don’t have automatic chat history saved. Here are a few simple ways to keep a copy:
+
+    Copy and paste
+
+        Select all the text in this chat and paste it into a text editor (Notepad, Word, or anything you like).
+
+    Print to PDF
+
+        Press Ctrl+P (or Cmd+P on Mac) → choose “Save as PDF” as the printer → save the chat as a PDF file.
+
+    Screenshots
+
+        Take screenshots of the conversation if you just want a visual record.
+
+Copy-paste or PDF is usually easiest if you want to refer back later while working in MATLAB or C#.
+
+Do you want me to continue with how the MATLAB script computes the fractional integral next?
+You said:
+if i log in, will this chat be saved?
+ChatGPT said:
+
+Yes — if you log in, your chats can be saved automatically in your account, so you can return to them later.
+
+A few things to know:
+
+    Saved chats are linked to your account, not your device.
+
+    You can name, search, or continue a saved chat.
+
+    If you don’t log in, this chat will not be saved when you close the page.
+
+So logging in is the easiest way to keep this conversation for future reference.
+
+Do you want me to continue now with the MATLAB script explanation?
+
+
+ChatGPT can make mistakes. Check important info. See Cookie Preferences.
