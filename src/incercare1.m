@@ -1,7 +1,7 @@
 clear all; clc; close all;
 
-% Load System Fan 4 (back exhaust) identification data
-data = readtable('sysid_20260102_145352.csv');
+% Load System Fan 4 (back exhaust) sine data
+data = readtable('sine_20260102_145352.csv');
 
 % Extract signals
 t = data.time_sec(:);
