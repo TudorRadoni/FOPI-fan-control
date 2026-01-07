@@ -1,7 +1,7 @@
 clear all; clc; close all;
 
 % Load System Fan 4 (back exhaust) identification data
-data = readtable('sysid_20260102_145352.csv');
+data = readtable('sine_20260102_145352.csv');
 
 % Extract signals
 t = data.time_sec(:);
@@ -20,7 +20,7 @@ xlabel('Time (s)');
 ylabel('Amplitude');
 
 %% Normalize signals and compute peaks
-freq = 0.01; % (Hz)
+freq = 2; % (Hz)
 phm = 60 / 180 * pi; % desired phase margin (rad)
 samples_per_period = round(1 / (freq * Ts));  % samples per sin period
 
@@ -162,4 +162,9 @@ bode(regd); hold off
 grid on
 title('Bode plot: Continuous vs Discrete FOPI Controller');
 
-% i stop here, because i do not have the transfer function of my fan
+%% Try the regulator on my transfer function
+HFan = getFanTF();
+figure,
+step(feedback(HFan * reg, 1));
+figure,
+step(feedback(reg, HFan));
