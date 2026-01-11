@@ -19,39 +19,47 @@ legend('PWM (%)','RPM');
 xlabel('Time (s)');
 ylabel('Amplitude');
 
+
 %% Normalize signals and compute peaks
-freq = 2; % (Hz)
-phm = 60 / 180 * pi; % desired phase margin (rad)
+freq = 2; % (Hz) - was 0.01 Hz, because that's how i generated my first sine
+phm = 45 / 180 * pi; % desired phase margin (rad)
 samples_per_period = round(1 / (freq * Ts));  % samples per sin period
 
+% Remove NaN values from signals
+y_rpm_clean = y_rpm(~isnan(y_rpm));
+
 % Detect RPM peaks
-[peaks_max, ~] = findpeaks(y_rpm, 'MinPeakDistance', floor(samples_per_period / 2));
-[peaks_min, ~] = findpeaks(-y_rpm, 'MinPeakDistance', floor(samples_per_period / 2));
+[peaks_max_tmp, ~] = findpeaks(y_rpm_clean, 'MinPeakDistance', floor(samples_per_period / 2));
+peaks_max = peaks_max_tmp(~isnan(peaks_max_tmp));
+[peaks_min_tmp, ~] = findpeaks(-y_rpm_clean, 'MinPeakDistance', floor(samples_per_period / 2));
+peaks_min = peaks_min_tmp(~isnan(peaks_min_tmp));
 peaks_min = -peaks_min;
 
-% Compute RPM amplitude scale
-amp_max = mean(peaks_max);
-amp_min = mean(peaks_min);
-scale = (amp_max - amp_min) / 2;
+% Compute RPM amplitude scale using mean of largest/smallest N peaks
+N = 20; % number of samples to use in mean
+sorted_max = sort(peaks_max, 'descend');
+sorted_min = sort(peaks_min, 'ascend');
+amp_max = mean(sorted_max(1:N));
+amp_min = mean(sorted_min(1:N));
+midpoint_rpm = (amp_max + amp_min) / 2;
 
-% Normalize RPM (PWM should remain the same, I think, because we cannot
-% send negative PWM to the fan.
-u_sim = u_pwm;
-y_norm = y_rpm - scale;
+% Center both PWM and RPM
+midpoint_pwm = (max(u_pwm) + min(u_pwm)) / 2;
+u_sim = u_pwm - midpoint_pwm;
+y_norm = y_rpm - midpoint_rpm;
 
-
-% Plot for visualization only
+% Plot for visualization
 figure;
 plot(t, u_sim, 'k', 'LineWidth', 1.2); hold on;
 plot(t, y_norm, 'b', 'LineWidth', 1.2);
 grid on;
-title('PWM input and scaled RPM output');
+title('Centered PWM and RPM');
 xlabel('Time [s]');
 ylabel('Amplitude');
 legend('PWM (%)', 'Scaled RPM');
 
 %%
-M =  amp_max - scale;
+M = amp_max - midpoint_rpm;
 Phi = freq*2*pi*(525.238 - 527.813); % measured phase shift (rad)
 
 % figure(2), plot(tout,U,'b'), hold on, plot(tout,Ybar_expe, 'r');
@@ -87,25 +95,25 @@ phase_deriv = MB / M * cos(PhiB - Phi);
 process_phase = Phi;
 
 %% Sweep fractional order mu and compute ki candidates
-mu_range = 0.2:0.001:2;  
-ki1_vals = zeros(size(mu_range));
-ki2_vals = zeros(size(mu_range));
-ki3_vals = zeros(size(mu_range));
+miu_range = 0.2:0.001:2;  
+ki1_vals = zeros(size(miu_range));
+ki2_vals = zeros(size(miu_range));
+ki3_vals = zeros(size(miu_range));
 
-for idx = 1:length(mu_range)
-    mu = mu_range(idx);
+for idx = 1:length(miu_range)
+    miu = miu_range(idx);
     
     % Fractional derivative constants
-    z1 = mu * wt^(-mu-1) * sin(pi*mu/2);
-    z2 = 2 * wt^(-mu) * cos(pi*mu/2);
-    z3 = wt^(-2*mu);
+    z1 = miu * wt^(-miu-1) * sin(pi*miu/2);
+    z2 = 2 * wt^(-miu) * cos(pi*miu/2);
+    z3 = wt^(-2*miu);
     
     % Candidate ki values from quadratic formula
     ki1 = -((z1 + z2*phase_deriv) + sqrt((z1 + z2*phase_deriv)^2 - 4*z3*phase_deriv^2)) / (2*z3*phase_deriv);
     ki2 = -((z1 + z2*phase_deriv) - sqrt((z1 + z2*phase_deriv)^2 - 4*z3*phase_deriv^2)) / (2*z3*phase_deriv);
     
     % Candidate ki value from phase margin formula
-    ki3 = (tan(pi - phm + process_phase) * wt^mu) / (sin(pi*mu/2) - tan(pi - phm + process_phase) * cos(pi*mu/2));
+    ki3 = (tan(pi - phm + process_phase) * wt^miu) / (sin(pi*miu/2) - tan(pi - phm + process_phase) * cos(pi*miu/2));
     
     % Store for plotting
     ki1_vals(idx) = ki1;
@@ -114,46 +122,40 @@ for idx = 1:length(mu_range)
 end
 
 % Plot comparison
-figure; plot(mu_range, ki1_vals, 'r', mu_range, ki3_vals, 'b'); grid on;
+figure; plot(miu_range, ki1_vals, 'r', miu_range, ki3_vals, 'b'); grid on;
 title('ki1 vs ki3'); xlabel('\mu'); ylabel('ki'); legend('ki1','ki3');
 
-figure; plot(mu_range, ki2_vals, 'r', mu_range, ki3_vals, 'b'); grid on;
+figure; plot(miu_range, ki2_vals, 'r', miu_range, ki3_vals, 'b'); grid on;
 title('ki2 vs ki3'); xlabel('\mu'); ylabel('ki'); legend('ki2','ki3');
 
 % TODO: choose mu based on plots
-mu = 1.09;  % example, tune based on intersection of ki curves
+miu = 1.09;  % example, tune based on intersection of ki curves
 
 % Compute ki from phase margin formula
-ki = (tan(pi - phm + process_phase) * wt^mu) / (sin(pi*mu/2) - tan(pi - phm + process_phase) * cos(pi*mu/2));
+ki = (tan(pi - phm + process_phase) * wt^miu) / (sin(pi*miu/2) - tan(pi - phm + process_phase) * cos(pi*miu/2));
 
 % Compute proportional gain
-kp = (1/M) * (1 / sqrt(1 + 2*ki*wt^(-mu)*cos(pi*mu/2) + (ki^2)*wt^(-2*mu)));
+kp = (1/M) * (1 / sqrt(1 + 2*ki*wt^(-miu)*cos(pi*miu/2) + (ki^2)*wt^(-2*miu)));
 
 %% Fractional controller construction
 
 % Fractional orders
-alfa1 = 1 - mu;
-alfa = mu;
+alpha1 = 1 - miu;
+alpha = miu;
+s_alpha1 = ora_foc_RdK(alpha1, 2, 0.01, 100);
 
-% Fractional derivative operator using Oustaloup approximation
-% s_alfa1 approximates s^(alfa1)
-s_alfa1 = ora_foc_RdK(alfa1, 2, 0.01, 100);
-
-% Continuous-time FOPI controller: kp + ki * integral^alfa1
-reg = minreal(kp + kp * ki * tf(1, [1, 0]) * s_alfa1);
+% Continuous-time FOPI controller: kp + ki * integral^alpha1
+reg = minreal(kp + kp * ki * tf(1, [1, 0]) * s_alpha1)
 
 % Discretize with 500ms sampling time for the C# code (ZOH)
 Ts_C_sharp = 0.5;
-regd = minreal(c2d(reg, Ts_C_sharp, 'zoh'), 1e-4);
+regd = minreal(c2d(reg, Ts_C_sharp, 'zoh'), 1e-4)
 
 % Display zeros, poles, gain
 disp('Discrete FOPI controller ZPK:');
 zpk(regd)
-
-% For recurrence relation / difference equation
 [num, den] = tfdata(regd, 'v');
-num
-den
+reccurenceRelFromNumDen(num, den)
 
 %% Frequency response comparison
 figure
